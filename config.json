@@ -3,11 +3,11 @@
   "chatId": 1331442691,
   "projects": [
     {
-      "topic": "cars",
+      "topic": "mitsubishi lancer",
       "url": "https://www.yad2.co.il/vehicles/cars?manufacturer=30&model=10379&year=2008--1&price=-1-7000"
     },
     {
-      "topic": "honda civic",
+      "topic": "honda civic", 
       "url": "https://www.yad2.co.il/vehicles/cars?manufacturer=17&model=10182&year=2008--1&price=-1-7000"
     }
   ]
