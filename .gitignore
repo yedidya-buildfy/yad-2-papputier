@@ -1,0 +1,29 @@
+# Environment variables
+.env
+
+# Dependencies
+node_modules/
+
+# Data files
+data/
+*.json
+
+# Debug files
+debug-page.html
+test.png
+*.png
+*.jpg
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Push flag file
+push_me
