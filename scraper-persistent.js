@@ -204,26 +204,30 @@ const scrape = async (topic, url) => {
     try {
         const listingUrls = await scrapeWithBrowser(url);
         
-        if (listingUrls.length === 0) {
-            console.log('👌 No listings found on page');
-            return;
-        }
-        
-        // For GitHub Actions: Only send notification if we find listings
-        // Since we can't persist state, we'll send a daily summary instead of individual notifications
+        // Always send a message - either about listings or no cars found
         const now = new Date();
         const israelTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jerusalem"}));
         const hour = israelTime.getHours();
         
-        // Only send notifications during peak hours (9 AM, 1 PM, 6 PM, 10 PM)
+        // Send notifications during peak hours (9 AM, 1 PM, 6 PM, 10 PM) OR for manual testing
         const peakHours = [9, 13, 18, 22];
+        const isManualTest = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
         
-        if (peakHours.includes(hour) && listingUrls.length > 0) {
-            const message = `🚗 סריקה של ${topic}: נמצאו ${listingUrls.length} מודעות\\n\\nכמה דוגמאות:\\n${listingUrls.slice(0, 3).join('\\n\\n')}`;
+        if (peakHours.includes(hour) || isManualTest) {
+            let message;
+            
+            if (listingUrls.length > 0) {
+                message = `🚗 סריקה של ${topic}: נמצאו ${listingUrls.length} מודעות\\n\\nכמה דוגמאות:\\n${listingUrls.slice(0, 3).join('\\n\\n')}`;
+                console.log(`📱 Sent summary notification for ${topic} (${listingUrls.length} listings)`);
+            } else {
+                message = `🚗 סריקה של ${topic}: אין רכבים חדשים`;
+                console.log(`📱 Sent "no new cars" notification for ${topic}`);
+            }
+            
             await telenode.sendTextMessage(message, chatId);
-            console.log(`📱 Sent summary notification for ${topic} (${listingUrls.length} listings)`);
         } else {
-            console.log(`⏰ Not a peak hour (${hour}:00), skipping notification`);
+            console.log(`⏰ Not a peak hour (${hour}:00) and not manual test, skipping notification`);
+            console.log(`📊 Found ${listingUrls.length} listings for ${topic}`);
         }
         
     } catch (error) {
