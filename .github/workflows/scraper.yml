@@ -2,12 +2,9 @@ name: Yad2 Car Scraper
 
 on:
   schedule:
-    # Run every 15 minutes during active hours (8 AM - 12 AM Israel time)
-    # Israel is UTC+2 (winter) or UTC+3 (summer)
-    # So 8 AM Israel = 6 AM UTC (winter) / 5 AM UTC (summer)
-    # 12 AM Israel = 10 PM UTC (winter) / 9 PM UTC (summer)
-    # We'll use UTC times and check Israel time in the script
-    - cron: '*/15 * * * *'  # Every 15 minutes
+    # Run only during peak notification times (Israel time)
+    # 9 AM, 1 PM, 6 PM, 10 PM Israel time
+    - cron: '0 6,10,15,19 * * *'  # Peak hours (UTC times)
   
   # Allow manual triggering
   workflow_dispatch:
@@ -29,20 +26,20 @@ jobs:
     - name: Install dependencies
       run: npm install
     
-    - name: Check if within active hours (8 AM - 12 AM Israel time)
+    - name: Check if within notification hours
       id: check-time
       run: |
         # Get current time in Israel timezone
         ISRAEL_HOUR=$(TZ='Asia/Jerusalem' date +'%H')
         echo "Current Israel hour: $ISRAEL_HOUR"
         
-        # Check if between 8 AM (08) and 11 PM (23) or exactly midnight (00)
-        if [ "$ISRAEL_HOUR" -ge 8 ] || [ "$ISRAEL_HOUR" -eq 0 ]; then
-          echo "Within active hours (8 AM - 12 AM)"
+        # Check if it's a peak notification hour (9, 13, 18, 22)
+        if [ "$ISRAEL_HOUR" -eq 9 ] || [ "$ISRAEL_HOUR" -eq 13 ] || [ "$ISRAEL_HOUR" -eq 18 ] || [ "$ISRAEL_HOUR" -eq 22 ]; then
+          echo "Peak notification hour - sending updates"
           echo "should_run=true" >> $GITHUB_OUTPUT
         else
-          echo "Outside active hours - sleeping"
-          echo "should_run=false" >> $GITHUB_OUTPUT
+          echo "Not a peak hour - silent scan"  
+          echo "should_run=true" >> $GITHUB_OUTPUT
         fi
     
     - name: Run scraper

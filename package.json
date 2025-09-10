@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node scraper.js",
     "test": "node scraper.js",
-    "github-action": "node scraper-single.js"
+    "github-action": "node scraper-persistent.js"
   },
   "dependencies": {
     "dotenv": "^17.2.2",
