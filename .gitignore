@@ -3,10 +3,11 @@
 
 # Dependencies
 node_modules/
+# Keep package-lock.json for GitHub Actions
 
 # Data files
 data/
-*.json
+data/*.json
 
 # Debug files
 debug-page.html
