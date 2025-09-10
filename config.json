@@ -1,0 +1,14 @@
+{
+  "telegramApiToken": "8468303288:AAF78S3A-ScMXI3tyDL6Hr8aCLODcTyNv1U",
+  "chatId": 1331442691,
+  "projects": [
+    {
+      "topic": "cars",
+      "url": "https://www.yad2.co.il/vehicles/cars?manufacturer=30&model=10379&year=2008--1&price=-1-7000"
+    },
+    {
+      "topic": "honda civic",
+      "url": "https://www.yad2.co.il/vehicles/cars?manufacturer=17&model=10182&year=2008--1&price=-1-7000"
+    }
+  ]
+}

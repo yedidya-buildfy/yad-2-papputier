@@ -1,0 +1,19 @@
+{
+  "name": "yad2-scraper",
+  "version": "1.0.0",
+  "description": "Simple Yad2 car scraper with Telegram notifications",
+  "main": "scraper.js",
+  "scripts": {
+    "start": "node scraper.js",
+    "test": "node scraper.js",
+    "github-action": "node scraper-single.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.2",
+    "node-cron": "^4.2.1",
+    "puppeteer": "^24.20.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "telenode-js": "^1.6.0"
+  }
+}
