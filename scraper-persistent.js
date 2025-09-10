@@ -214,17 +214,28 @@ const scrape = async (topic, url) => {
         const isManualTest = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
         
         if (peakHours.includes(hour) || isManualTest) {
-            let message;
-            
             if (listingUrls.length > 0) {
-                message = `🚗 סריקה של ${topic}: נמצאו ${listingUrls.length} מודעות\\n\\nכמה דוגמאות:\\n${listingUrls.slice(0, 3).join('\\n\\n')}`;
-                console.log(`📱 Sent summary notification for ${topic} (${listingUrls.length} listings)`);
+                // Send each car listing as a separate Hebrew message
+                for (const listingUrl of listingUrls.slice(0, 10)) { // Limit to first 10 to avoid spam
+                    const message = `היי יש לך מודעה חדשה של ${topic}! ${listingUrl}`;
+                    await telenode.sendTextMessage(message, chatId);
+                    
+                    // Small delay between messages to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                
+                console.log(`📱 Sent ${Math.min(listingUrls.length, 10)} individual notifications for ${topic}`);
+                
+                // If more than 10, send summary of remaining
+                if (listingUrls.length > 10) {
+                    const summaryMessage = `יש לך עוד ${listingUrls.length - 10} מודעות נוספות של ${topic}!`;
+                    await telenode.sendTextMessage(summaryMessage, chatId);
+                }
             } else {
-                message = `🚗 סריקה של ${topic}: אין רכבים חדשים`;
+                const message = `🚗 סריקה של ${topic}: אין רכבים חדשים`;
+                await telenode.sendTextMessage(message, chatId);
                 console.log(`📱 Sent "no new cars" notification for ${topic}`);
             }
-            
-            await telenode.sendTextMessage(message, chatId);
         } else {
             console.log(`⏰ Not a peak hour (${hour}:00) and not manual test, skipping notification`);
             console.log(`📊 Found ${listingUrls.length} listings for ${topic}`);
