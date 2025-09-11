@@ -5,6 +5,8 @@ on:
     # Run only during peak notification times (Israel time)
     # 9 AM, 1 PM, 6 PM, 10 PM Israel time
     - cron: '0 6,10,15,19 * * *'  # Peak hours (UTC times)
+    # Keep repo active to prevent workflow disabling
+    - cron: '0 12 * * *'  # Daily keepalive at noon UTC
   
   # Allow manual triggering
   workflow_dispatch:

@@ -1,0 +1,32 @@
+name: Keep Repo Active
+
+on:
+  schedule:
+    # Run daily at midnight UTC to keep the repo active
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Update keepalive file
+      run: |
+        echo "Last activity: $(date)" > .keepalive
+        
+    - name: Commit keepalive
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .keepalive
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Keep repo active - $(date '+%Y-%m-%d')" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
+        fi
