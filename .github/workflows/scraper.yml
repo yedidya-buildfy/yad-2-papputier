@@ -2,13 +2,8 @@ name: Yad2 Car Scraper
 
 on:
   schedule:
-    # Run only during peak notification times (Israel time)
-    # 9 AM, 1 PM, 6 PM, 10 PM Israel time
-    - cron: '0 6,10,15,19 * * *'  # Peak hours (UTC times)
-    # Test run at 9:20 AM Israel time (6:20 UTC)
-    - cron: '20 6 * * *'  # Test run
-    # Keep repo active to prevent workflow disabling
-    - cron: '0 12 * * *'  # Daily keepalive at noon UTC
+    # Run every hour from 08:00 to 24:00 Israel time (5:00-21:00 UTC)
+    - cron: '0 5-21 * * *'  # Every hour from 5 UTC to 21 UTC (8 AM to 12 AM Israel time)
   
   # Allow manual triggering
   workflow_dispatch:
@@ -32,20 +27,26 @@ jobs:
     - name: Install dependencies
       run: npm install
     
-    - name: Check if within notification hours
+    - name: Install Chrome for Puppeteer
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser
+        export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    
+    - name: Check if within active hours
       id: check-time
       run: |
         # Get current time in Israel timezone
         ISRAEL_HOUR=$(TZ='Asia/Jerusalem' date +'%H')
         echo "Current Israel hour: $ISRAEL_HOUR"
         
-        # Check if it's a peak notification hour (9, 13, 18, 22)
-        if [ "$ISRAEL_HOUR" -eq 9 ] || [ "$ISRAEL_HOUR" -eq 13 ] || [ "$ISRAEL_HOUR" -eq 18 ] || [ "$ISRAEL_HOUR" -eq 22 ]; then
-          echo "Peak notification hour - sending updates"
+        # Check if it's within active hours (8 AM to 12 AM = 8-23)
+        if [ "$ISRAEL_HOUR" -ge 8 ] && [ "$ISRAEL_HOUR" -le 23 ]; then
+          echo "Within active hours (8 AM - 12 AM) - running scraper"
           echo "should_run=true" >> $GITHUB_OUTPUT
         else
-          echo "Not a peak hour - silent scan"  
-          echo "should_run=true" >> $GITHUB_OUTPUT
+          echo "Outside active hours - sleeping"  
+          echo "should_run=false" >> $GITHUB_OUTPUT
         fi
     
     - name: Run scraper
@@ -62,14 +63,14 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
-        # Add the updated last-seen.json if it changed
-        git add data/last-seen.json
+        # Add the updated listings.json if it changed
+        git add data/listings.json
         
         # Commit if there are changes
         if git diff --staged --quiet; then
           echo "No changes to persistence data"
         else
-          git commit -m "Update last-seen listings - $(date '+%Y-%m-%d %H:%M UTC')"
+          git commit -m "Update car listings - $(date '+%Y-%m-%d %H:%M UTC')"
           git push
           echo "Committed updated persistence data"
         fi

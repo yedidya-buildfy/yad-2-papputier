@@ -4,6 +4,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const Telenode = require('telenode-js');
 const fs = require('fs');
 const cron = require('node-cron');
+const SimpleDataManager = require('./data-manager');
 
 // Add stealth plugin
 puppeteer.use(StealthPlugin());
@@ -87,64 +88,60 @@ const scrapeWithBrowser = async (url) => {
             console.log('⚠️  Timeout waiting for images, proceeding anyway...');
         });
         
-        // Extract listing links - try multiple strategies
+        // Extract listing links using winning approach - filter for main feed only
         const listingData = await page.evaluate(() => {
-            let listings = [];
+            console.log('🔍 Starting main feed extraction...');
             
-            // Strategy 1: Look for listing links with common selectors
-            const linkSelectors = [
-                'a[href*="/vehicles/item/"]',
-                'a[href*="/item/"]', 
-                'a[href*="vehicle"]',
-                '[data-testid*="item"] a',
-                '[data-testid*="listing"] a',
-                '.feeditem a',
-                '.listing a'
-            ];
+            // Use the winning selector that found 57+ links
+            const allLinks = document.querySelectorAll('a[data-nagish*="item"]');
+            console.log(`Found ${allLinks.length} total links with winning selector`);
             
-            for (const selector of linkSelectors) {
-                const links = document.querySelectorAll(selector);
-                links.forEach(link => {
-                    const href = link.href;
-                    if (href && href.includes('yad2.co.il') && !href.includes('#') && !listings.includes(href)) {
-                        listings.push(href);
-                    }
-                });
-                
-                if (listings.length > 0) {
-                    console.log(`Found ${listings.length} listings with selector: ${selector}`);
-                    break;
+            let mainFeedResults = [];
+            let filteredOut = 0;
+            
+            allLinks.forEach((link, index) => {
+                if (!link.href || !link.href.includes('/item/')) {
+                    return;
                 }
-            }
-            
-            // Strategy 2: If no specific listings found, look for any yad2 links
-            if (listings.length === 0) {
-                const allLinks = document.querySelectorAll('a[href*="yad2.co.il"]');
-                allLinks.forEach(link => {
-                    const href = link.href;
-                    if (href && 
-                        href.includes('/vehicles/') && 
-                        !href.includes('/cars?') && 
-                        !href.includes('#') &&
-                        !listings.includes(href)) {
-                        listings.push(href);
+                
+                const url = link.href;
+                
+                // Filter to only include main feed results (exclude recommendations)
+                if (url.includes('component-type=main_feed')) {
+                    mainFeedResults.push(url);
+                } else if (url.includes('component-type=recommendation') || 
+                          url.includes('spot=look_alike') ||
+                          url.includes('דגמים_דומים') || 
+                          url.includes('recommendation')) {
+                    // These are recommendations/suggestions - filter them out
+                    filteredOut++;
+                } else {
+                    // If no clear component-type, check if it's a clean listing URL
+                    if (!url.includes('דגמים_דומים') && !url.includes('recommendation')) {
+                        mainFeedResults.push(url);
+                    } else {
+                        filteredOut++;
                     }
-                });
-                console.log(`Found ${listings.length} generic vehicle links`);
-            }
+                }
+            });
             
-            // Strategy 3: Debug - show all links for analysis
-            if (listings.length === 0) {
-                const debugLinks = document.querySelectorAll('a');
-                console.log('DEBUG: Found', debugLinks.length, 'total links');
-                debugLinks.forEach((link, i) => {
-                    if (i < 20 && link.href) { // Log first 20 for debugging
-                        console.log(`Link ${i}: ${link.href}`);
-                    }
-                });
-            }
+            // Remove duplicates based on listing ID
+            const uniqueMainFeed = [];
+            const seenIds = new Set();
             
-            return [...new Set(listings)]; // Remove duplicates
+            mainFeedResults.forEach(url => {
+                const idMatch = url.match(/\/item\/([a-z0-9]+)/i);
+                const listingId = idMatch ? idMatch[1] : 'unknown';
+                
+                if (!seenIds.has(listingId)) {
+                    seenIds.add(listingId);
+                    uniqueMainFeed.push(url);
+                }
+            });
+            
+            console.log(`📊 Main feed results: ${uniqueMainFeed.length}, Filtered out: ${filteredOut}`);
+            
+            return uniqueMainFeed;
         });
         
         await browser.close();
@@ -158,37 +155,23 @@ const scrapeWithBrowser = async (url) => {
 };
 
 const checkIfHasNewItem = async (listingUrls, topic) => {
-    const filePath = `./data/${topic}.json`;
-    let savedUrls = [];
+    const dataManager = new SimpleDataManager();
     
-    // Create data directory if it doesn't exist
-    if (!fs.existsSync('./data')) {
-        fs.mkdirSync('./data');
+    // Check if this is the first run for this topic
+    if (dataManager.isFirstRun(topic)) {
+        console.log(`🆕 First run for "${topic}" - bootstrapping ${listingUrls.length} listings without notifications`);
+        dataManager.updateProject(topic, listingUrls);
+        return []; // No new items for first run
     }
     
-    try {
-        const data = fs.readFileSync(filePath, 'utf8');
-        savedUrls = JSON.parse(data);
-    } catch (e) {
-        // File doesn't exist, create it
-        fs.writeFileSync(filePath, '[]');
-        savedUrls = [];
-    }
+    // Find new listings compared to last crawl
+    const newItems = dataManager.findNewListings(topic, listingUrls);
     
-    const newItems = [];
+    // Update the project data with current listings
+    dataManager.updateProject(topic, listingUrls);
     
-    listingUrls.forEach(url => {
-        if (!savedUrls.includes(url)) {
-            savedUrls.push(url);
-            newItems.push(url);
-        }
-    });
-    
-    // Save updated list
+    // Create push flag for workflow if there are new items
     if (newItems.length > 0) {
-        fs.writeFileSync(filePath, JSON.stringify(savedUrls, null, 2));
-        
-        // Create push flag for workflow
         fs.writeFileSync("push_me", "");
     }
     
@@ -196,11 +179,11 @@ const checkIfHasNewItem = async (listingUrls, topic) => {
 };
 
 const scrape = async (topic, url) => {
-    const apiToken = process.env.TELEGRAM_API_TOKEN || config.telegramApiToken;
-    const chatId = process.env.CHAT_ID || config.chatId;
+    const apiToken = process.env.TELEGRAM_API_TOKEN;
+    const chatId = process.env.CHAT_ID;
     
     if (!apiToken || !chatId) {
-        console.error('❌ Telegram credentials missing. Check .env file or config.json');
+        console.error('❌ Telegram credentials missing. Check .env file');
         return;
     }
     
@@ -212,22 +195,19 @@ const scrape = async (topic, url) => {
         
         if (newItems.length > 0) {
             // Send Hebrew message for each new listing
-            for (const listingUrl of newItems.slice(0, 10)) { // Limit to first 10 to avoid spam
+            for (const listingUrl of newItems) {
                 const message = `היי יש לך מודעה חדשה! ${listingUrl}`;
                 await telenode.sendTextMessage(message, chatId);
                 
                 // Small delay between messages to avoid rate limiting
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
-            console.log(`📱 Sent ${Math.min(newItems.length, 10)} Hebrew notifications`);
-            
-            // If more than 10, send summary
-            if (newItems.length > 10) {
-                const summaryMessage = `יש לך עוד ${newItems.length - 10} מודעות חדשות!`;
-                await telenode.sendTextMessage(summaryMessage, chatId);
-            }
+            console.log(`📱 Sent ${newItems.length} Hebrew notifications`);
         } else {
             console.log('👌 No new listings found');
+            const noNewCarsMessage = `אוי חמודדדד לא נורא אולי נמצא מכונית בעוד שעה`;
+            await telenode.sendTextMessage(noNewCarsMessage, chatId);
+            console.log(`📱 Sent "no new cars" message`);
         }
         
     } catch (error) {
@@ -262,7 +242,7 @@ const isWithinActiveHours = () => {
 
 const program = async () => {
     console.log('🤖 Yad2 Auto-Scraper Started!');
-    console.log('⏰ Scanning every 15 minutes between 8 AM - 12 AM (Israel time)');
+    console.log('⏰ Scanning every hour between 8 AM - 12 AM (Israel time)');
     console.log('📱 Hebrew notifications will be sent to Telegram');
     console.log('🌙 Scanner sleeps from 12 AM - 8 AM');
     console.log('🔄 Press Ctrl+C to stop\\n');
@@ -274,8 +254,8 @@ const program = async () => {
         console.log('😴 Outside active hours (8 AM - 12 AM). Scanner is sleeping...');
     }
     
-    // Schedule to run every 15 minutes, but only during active hours
-    cron.schedule('*/15 * * * *', async () => {
+    // Schedule to run every hour, but only during active hours
+    cron.schedule('0 * * * *', async () => {
         if (isWithinActiveHours()) {
             console.log('\\n⏰ Scheduled scan triggered...');
             await runScan();

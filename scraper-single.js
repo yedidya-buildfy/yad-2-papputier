@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const Telenode = require('telenode-js');
 const fs = require('fs');
+const SimpleDataManager = require('./data-manager');
 
 // Add stealth plugin
 puppeteer.use(StealthPlugin());
@@ -86,53 +87,60 @@ const scrapeWithBrowser = async (url) => {
             console.log('⚠️  Timeout waiting for images, proceeding anyway...');
         });
         
-        // Extract listing links - try multiple strategies
+        // Extract listing links using winning approach - filter for main feed only
         const listingData = await page.evaluate(() => {
-            let listings = [];
+            console.log('🔍 Starting main feed extraction...');
             
-            // Strategy 1: Look for listing links with common selectors
-            const linkSelectors = [
-                'a[href*="/vehicles/item/"]',
-                'a[href*="/item/"]', 
-                'a[href*="vehicle"]',
-                '[data-testid*="item"] a',
-                '[data-testid*="listing"] a',
-                '.feeditem a',
-                '.listing a'
-            ];
+            // Use the winning selector that found 57+ links
+            const allLinks = document.querySelectorAll('a[data-nagish*="item"]');
+            console.log(`Found ${allLinks.length} total links with winning selector`);
             
-            for (const selector of linkSelectors) {
-                const links = document.querySelectorAll(selector);
-                links.forEach(link => {
-                    const href = link.href;
-                    if (href && href.includes('yad2.co.il') && !href.includes('#') && !listings.includes(href)) {
-                        listings.push(href);
-                    }
-                });
-                
-                if (listings.length > 0) {
-                    console.log(`Found ${listings.length} listings with selector: ${selector}`);
-                    break;
+            let mainFeedResults = [];
+            let filteredOut = 0;
+            
+            allLinks.forEach((link, index) => {
+                if (!link.href || !link.href.includes('/item/')) {
+                    return;
                 }
-            }
-            
-            // Strategy 2: If no specific listings found, look for any yad2 links
-            if (listings.length === 0) {
-                const allLinks = document.querySelectorAll('a[href*="yad2.co.il"]');
-                allLinks.forEach(link => {
-                    const href = link.href;
-                    if (href && 
-                        href.includes('/vehicles/') && 
-                        !href.includes('/cars?') && 
-                        !href.includes('#') &&
-                        !listings.includes(href)) {
-                        listings.push(href);
+                
+                const url = link.href;
+                
+                // Filter to only include main feed results (exclude recommendations)
+                if (url.includes('component-type=main_feed')) {
+                    mainFeedResults.push(url);
+                } else if (url.includes('component-type=recommendation') || 
+                          url.includes('spot=look_alike') ||
+                          url.includes('דגמים_דומים') || 
+                          url.includes('recommendation')) {
+                    // These are recommendations/suggestions - filter them out
+                    filteredOut++;
+                } else {
+                    // If no clear component-type, check if it's a clean listing URL
+                    if (!url.includes('דגמים_דומים') && !url.includes('recommendation')) {
+                        mainFeedResults.push(url);
+                    } else {
+                        filteredOut++;
                     }
-                });
-                console.log(`Found ${listings.length} generic vehicle links`);
-            }
+                }
+            });
             
-            return [...new Set(listings)]; // Remove duplicates
+            // Remove duplicates based on listing ID
+            const uniqueMainFeed = [];
+            const seenIds = new Set();
+            
+            mainFeedResults.forEach(url => {
+                const idMatch = url.match(/\/item\/([a-z0-9]+)/i);
+                const listingId = idMatch ? idMatch[1] : 'unknown';
+                
+                if (!seenIds.has(listingId)) {
+                    seenIds.add(listingId);
+                    uniqueMainFeed.push(url);
+                }
+            });
+            
+            console.log(`📊 Main feed results: ${uniqueMainFeed.length}, Filtered out: ${filteredOut}`);
+            
+            return uniqueMainFeed;
         });
         
         await browser.close();
@@ -146,43 +154,27 @@ const scrapeWithBrowser = async (url) => {
 };
 
 const checkIfHasNewItem = async (listingUrls, topic) => {
-    const filePath = `./data/${topic}.json`;
-    let savedUrls = [];
+    const dataManager = new SimpleDataManager();
     
-    // Create data directory if it doesn't exist
-    if (!fs.existsSync('./data')) {
-        fs.mkdirSync('./data');
+    // Check if this is the first run for this topic
+    if (dataManager.isFirstRun(topic)) {
+        console.log(`🆕 First run for "${topic}" - bootstrapping ${listingUrls.length} listings without notifications`);
+        dataManager.updateProject(topic, listingUrls);
+        return []; // No new items for first run
     }
     
-    try {
-        const data = fs.readFileSync(filePath, 'utf8');
-        savedUrls = JSON.parse(data);
-    } catch (e) {
-        // File doesn't exist, create it
-        fs.writeFileSync(filePath, '[]');
-        savedUrls = [];
-    }
+    // Find new listings compared to last crawl
+    const newItems = dataManager.findNewListings(topic, listingUrls);
     
-    const newItems = [];
-    
-    listingUrls.forEach(url => {
-        if (!savedUrls.includes(url)) {
-            savedUrls.push(url);
-            newItems.push(url);
-        }
-    });
-    
-    // Save updated list
-    if (newItems.length > 0) {
-        fs.writeFileSync(filePath, JSON.stringify(savedUrls, null, 2));
-    }
+    // Update the project data with current listings
+    dataManager.updateProject(topic, listingUrls);
     
     return newItems;
 };
 
 const scrape = async (topic, url) => {
-    const apiToken = process.env.TELEGRAM_API_TOKEN || config.telegramApiToken;
-    const chatId = process.env.CHAT_ID || config.chatId;
+    const apiToken = process.env.TELEGRAM_API_TOKEN;
+    const chatId = process.env.CHAT_ID;
     
     if (!apiToken || !chatId) {
         console.error('❌ Telegram credentials missing. Check GitHub secrets');
@@ -197,22 +189,19 @@ const scrape = async (topic, url) => {
         
         if (newItems.length > 0) {
             // Send Hebrew message for each new listing
-            for (const listingUrl of newItems.slice(0, 10)) { // Limit to first 10 to avoid spam
+            for (const listingUrl of newItems) {
                 const message = `היי יש לך מודעה חדשה! ${listingUrl}`;
                 await telenode.sendTextMessage(message, chatId);
                 
                 // Small delay between messages to avoid rate limiting
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
-            console.log(`📱 Sent ${Math.min(newItems.length, 10)} Hebrew notifications`);
-            
-            // If more than 10, send summary
-            if (newItems.length > 10) {
-                const summaryMessage = `יש לך עוד ${newItems.length - 10} מודעות חדשות!`;
-                await telenode.sendTextMessage(summaryMessage, chatId);
-            }
+            console.log(`📱 Sent ${newItems.length} Hebrew notifications`);
         } else {
             console.log('👌 No new listings found');
+            const noNewCarsMessage = `אוי חמודדדד לא נורא אולי נמצא מכונית בעוד שעה`;
+            await telenode.sendTextMessage(noNewCarsMessage, chatId);
+            console.log(`📱 Sent "no new cars" message`);
         }
         
     } catch (error) {
