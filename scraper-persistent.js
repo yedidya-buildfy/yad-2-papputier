@@ -244,6 +244,17 @@ const scrape = async (topic, url) => {
     try {
         const allListingUrls = await scrapeWithBrowser(url);
         
+        // Check if this is a brand new topic (bootstrap mode)
+        const data = getStoredData();
+        const isNewTopic = !data[topic] || data[topic].length === 0;
+        
+        if (isNewTopic) {
+            console.log(`🆕 New topic "${topic}" detected - bootstrapping ${allListingUrls.length} listings without notifications`);
+            updateStoredListings(topic, allListingUrls);
+            console.log(`✅ Bootstrapped ${allListingUrls.length} listings for "${topic}" - future runs will only notify about new cars`);
+            return; // Skip notifications for bootstrap run
+        }
+        
         // Check which listings are actually new using git-based persistence
         const newListingUrls = checkIfHasNewItem(allListingUrls, topic);
         
