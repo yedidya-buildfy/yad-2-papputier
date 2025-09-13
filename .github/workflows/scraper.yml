@@ -16,6 +16,8 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Allow the workflow to commit back to repo
     
     steps:
     - name: Checkout code
@@ -52,6 +54,25 @@ jobs:
         TELEGRAM_API_TOKEN: ${{ secrets.TELEGRAM_API_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
       run: npm run github-action
+    
+    - name: Commit persistence data
+      if: steps.check-time.outputs.should_run == 'true'
+      run: |
+        # Configure git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add the updated last-seen.json if it changed
+        git add data/last-seen.json
+        
+        # Commit if there are changes
+        if git diff --staged --quiet; then
+          echo "No changes to persistence data"
+        else
+          git commit -m "Update last-seen listings - $(date '+%Y-%m-%d %H:%M UTC')"
+          git push
+          echo "Committed updated persistence data"
+        fi
     
     - name: Sleep message
       if: steps.check-time.outputs.should_run == 'false'

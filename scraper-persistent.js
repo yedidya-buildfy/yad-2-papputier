@@ -145,36 +145,33 @@ const scrapeWithBrowser = async (url) => {
     }
 };
 
-// Use environment variables to store last seen listings (GitHub Actions compatible)
-const getStoredListings = async (topic) => {
-    const envKey = `LAST_SEEN_${topic.toUpperCase().replace(/\s+/g, '_')}`;
-    const stored = process.env[envKey];
-    
-    if (stored) {
-        try {
-            return JSON.parse(stored);
-        } catch (e) {
-            console.log(`⚠️ Failed to parse stored listings for ${topic}`);
-            return [];
-        }
-    }
-    
-    // If no env var, check if local file exists (for local testing)
-    const filePath = `./data/${topic}.json`;
+// Git-based persistence - read from last-seen.json in repo
+const getStoredData = () => {
+    const filePath = './data/last-seen.json';
     try {
         if (fs.existsSync(filePath)) {
             const data = fs.readFileSync(filePath, 'utf8');
             return JSON.parse(data);
         }
     } catch (e) {
-        // Ignore file errors
+        console.log(`⚠️ Failed to read last-seen.json: ${e.message}`);
     }
     
-    return [];
+    // Return default structure if file doesn't exist or is corrupted
+    return {
+        "mitsubishi lancer": [],
+        "honda civic": [],
+        "lastUpdated": null
+    };
 };
 
-const checkIfHasNewItem = async (listingUrls, topic) => {
-    const savedUrls = await getStoredListings(topic);
+const getStoredListings = (topic) => {
+    const data = getStoredData();
+    return data[topic] || [];
+};
+
+const checkIfHasNewItem = (listingUrls, topic) => {
+    const savedUrls = getStoredListings(topic);
     const newItems = [];
     
     listingUrls.forEach(url => {
@@ -183,11 +180,54 @@ const checkIfHasNewItem = async (listingUrls, topic) => {
         }
     });
     
-    // For GitHub Actions: We can't persist between runs, so we accept this limitation
-    // The first run will always notify about all items
-    console.log(`📊 Found ${listingUrls.length} total, ${newItems.length} new for ${topic}`);
+    console.log(`📊 Found ${listingUrls.length} total, ${savedUrls.length} previously seen, ${newItems.length} new for ${topic}`);
     
     return newItems;
+};
+
+// Save updated listings back to git file
+const saveStoredData = (data) => {
+    const filePath = './data/last-seen.json';
+    try {
+        // Ensure data directory exists
+        const dir = './data';
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        // Add timestamp
+        data.lastUpdated = new Date().toISOString();
+        
+        // Write to file with pretty formatting
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        console.log(`💾 Saved listings data to ${filePath}`);
+        return true;
+    } catch (e) {
+        console.error(`❌ Failed to save listings data: ${e.message}`);
+        return false;
+    }
+};
+
+const updateStoredListings = (topic, newUrls) => {
+    const data = getStoredData();
+    
+    // Add new URLs to existing ones (avoid duplicates)
+    if (!data[topic]) {
+        data[topic] = [];
+    }
+    
+    newUrls.forEach(url => {
+        if (!data[topic].includes(url)) {
+            data[topic].push(url);
+        }
+    });
+    
+    // Keep only last 50 URLs per topic to prevent file from growing too large
+    if (data[topic].length > 50) {
+        data[topic] = data[topic].slice(-50);
+    }
+    
+    return saveStoredData(data);
 };
 
 const scrape = async (topic, url) => {
@@ -202,9 +242,12 @@ const scrape = async (topic, url) => {
     const telenode = new Telenode({ apiToken });
     
     try {
-        const listingUrls = await scrapeWithBrowser(url);
+        const allListingUrls = await scrapeWithBrowser(url);
         
-        // Always send a message - either about listings or no cars found
+        // Check which listings are actually new using git-based persistence
+        const newListingUrls = checkIfHasNewItem(allListingUrls, topic);
+        
+        // Always send a message - either about new listings or no new cars found
         const now = new Date();
         const israelTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jerusalem"}));
         const hour = israelTime.getHours();
@@ -214,9 +257,9 @@ const scrape = async (topic, url) => {
         const isManualTest = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
         
         if (peakHours.includes(hour) || isManualTest) {
-            if (listingUrls.length > 0) {
-                // Send each car listing as a separate Hebrew message
-                for (const listingUrl of listingUrls.slice(0, 10)) { // Limit to first 10 to avoid spam
+            if (newListingUrls.length > 0) {
+                // Send each NEW car listing as a separate Hebrew message
+                for (const listingUrl of newListingUrls.slice(0, 10)) { // Limit to first 10 to avoid spam
                     const message = `היי יש לך מודעה חדשה של ${topic}! ${listingUrl}`;
                     await telenode.sendTextMessage(message, chatId);
                     
@@ -224,21 +267,31 @@ const scrape = async (topic, url) => {
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 
-                console.log(`📱 Sent ${Math.min(listingUrls.length, 10)} individual notifications for ${topic}`);
+                console.log(`📱 Sent ${Math.min(newListingUrls.length, 10)} individual notifications for ${topic}`);
                 
-                // If more than 10, send summary of remaining
-                if (listingUrls.length > 10) {
-                    const summaryMessage = `יש לך עוד ${listingUrls.length - 10} מודעות נוספות של ${topic}!`;
+                // If more than 10 new listings, send summary of remaining
+                if (newListingUrls.length > 10) {
+                    const summaryMessage = `יש לך עוד ${newListingUrls.length - 10} מודעות חדשות נוספות של ${topic}!`;
                     await telenode.sendTextMessage(summaryMessage, chatId);
                 }
+                
+                // Update stored listings with all current URLs (including new ones)
+                updateStoredListings(topic, allListingUrls);
             } else {
+                // Send Hebrew message when no NEW cars found (different from before!)
                 const message = `🚗 סריקה של ${topic}: אין רכבים חדשים`;
                 await telenode.sendTextMessage(message, chatId);
                 console.log(`📱 Sent "no new cars" notification for ${topic}`);
             }
         } else {
             console.log(`⏰ Not a peak hour (${hour}:00) and not manual test, skipping notification`);
-            console.log(`📊 Found ${listingUrls.length} listings for ${topic}`);
+            console.log(`📊 Found ${allListingUrls.length} total, ${newListingUrls.length} new for ${topic}`);
+            
+            // Even during non-peak hours, update storage for new listings found
+            if (newListingUrls.length > 0) {
+                updateStoredListings(topic, allListingUrls);
+                console.log(`💾 Updated storage with ${newListingUrls.length} new listings for ${topic}`);
+            }
         }
         
     } catch (error) {

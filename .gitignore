@@ -5,9 +5,8 @@
 node_modules/
 # Keep package-lock.json for GitHub Actions
 
-# Data files
-data/
-data/*.json
+# Data files (but track last-seen.json for persistence)
+# Note: last-seen.json is tracked for git-based persistence
 
 # Debug files
 debug-page.html
