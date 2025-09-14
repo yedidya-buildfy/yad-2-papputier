@@ -56,9 +56,15 @@ class SimpleDataManager {
 
     updateProject(projectName, newListingUrls) {
         const data = this.loadData();
-        const newIds = this.extractListingIds(newListingUrls);
+        let newIds = this.extractListingIds(newListingUrls);
         const existingIds = data[projectName] || [];
-        
+
+        // Limit to max 100 IDs per project for efficiency
+        if (newIds.length > 100) {
+            console.log(`📏 Limiting ${projectName} from ${newIds.length} to 100 listings (keeping newest)`);
+            newIds = newIds.slice(0, 100);
+        }
+
         // Prevent data loss - only ADD new listings, never replace with fewer
         if (newIds.length === 0) {
             console.log(`⚠️ Warning: Found 0 listings for ${projectName}, not updating data (potential scraping failure)`);
@@ -76,16 +82,27 @@ class SimpleDataManager {
                     combinedIds.push(id);
                 }
             });
-            
-            data[projectName] = combinedIds;
+
+            // Ensure combined list doesn't exceed 100 (keep newest)
+            if (combinedIds.length > 100) {
+                console.log(`📏 Combined list for ${projectName} has ${combinedIds.length} IDs, keeping newest 100`);
+                data[projectName] = combinedIds.slice(0, 100);
+            } else {
+                data[projectName] = combinedIds;
+            }
             this.saveData(data);
             return combinedIds;
         }
         
-        // Normal case: similar or more listings found, safe to update
-        data[projectName] = newIds;
+        // Normal case: similar or more listings found, safe to update (max 100)
+        const limitedIds = newIds.length > 100 ? newIds.slice(0, 100) : newIds;
+        if (limitedIds.length < newIds.length) {
+            console.log(`📏 Normal update for ${projectName}: limiting to 100 from ${newIds.length} IDs`);
+        }
+
+        data[projectName] = limitedIds;
         this.saveData(data);
-        return newIds;
+        return limitedIds;
     }
 
     findNewListings(projectName, currentListingUrls) {

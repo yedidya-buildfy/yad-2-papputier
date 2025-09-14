@@ -87,18 +87,22 @@ const scrapeWithBrowser = async (url) => {
             console.log('⚠️  Timeout waiting for images, proceeding anyway...');
         });
         
-        // Extract listing links using winning approach - filter for main feed only
+        // Extract listing links using winning approach - filter for main feed only (max 100)
         const listingData = await page.evaluate(() => {
-            console.log('🔍 Starting main feed extraction...');
-            
-            // Use the winning selector that found 57+ links
+            console.log('🔍 Starting main feed extraction (max 100 results)...');
+
+            // Use the winning selector that found 57+ links, but limit to first 100 for performance
             const allLinks = document.querySelectorAll('a[data-nagish*="item"]');
-            console.log(`Found ${allLinks.length} total links with winning selector`);
+            console.log(`Found ${allLinks.length} total links with winning selector, processing first 100`);
             
             let mainFeedResults = [];
             let filteredOut = 0;
-            
-            allLinks.forEach((link, index) => {
+
+            // Process only first 100 links for efficiency with large datasets
+            const linksToProcess = Array.from(allLinks).slice(0, 100);
+            console.log(`Processing ${linksToProcess.length} links (limited from ${allLinks.length} total)`);
+
+            linksToProcess.forEach((link, index) => {
                 if (!link.href || !link.href.includes('/item/')) {
                     return;
                 }
@@ -138,7 +142,7 @@ const scrapeWithBrowser = async (url) => {
                 }
             });
             
-            console.log(`📊 Main feed results: ${uniqueMainFeed.length}, Filtered out: ${filteredOut}`);
+            console.log(`📊 Main feed results: ${uniqueMainFeed.length}, Filtered out: ${filteredOut} (from first 100 of ${allLinks.length} total)`);
             
             return uniqueMainFeed;
         });
